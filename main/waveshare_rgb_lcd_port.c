@@ -193,7 +193,7 @@ static esp_err_t i2c_master_init(int sda, int scl)
         .scl_io_num = scl,
         .sda_pullup_en = GPIO_PULLUP_ENABLE,
         .scl_pullup_en = GPIO_PULLUP_ENABLE,
-        .master.clk_speed = 100000, /* 100kHz standard speed for stable GT911 communication */
+        .master.clk_speed = 100000,
     };
     i2c_param_config(I2C_MASTER_NUM, &i2c_conf);
     return i2c_driver_install(I2C_MASTER_NUM, i2c_conf.mode, 0, 0, 0);
@@ -209,7 +209,7 @@ static esp_err_t ch422g_write(uint8_t addr, uint8_t val)
 
 /* CH32V003 helper MCU on the 7B (I2C 0x24): register writes, not the
  * CH422G address scheme. 0x02 pin modes, 0x03 output byte, 0x05 PWM.
- * IO1 = TP_RST, IO2 = backlight enable, IO3 = LCD_RST, IO4 = SD_CS. */
+ * IO0 = LCD_RST, IO1 = TP_RST, IO2 = backlight enable, IO3 = SD_CS. */
 static uint8_t s_ch32_out = 0xFF;
 
 static esp_err_t ch32v003_reg_write(uint8_t reg, uint8_t val)
@@ -288,28 +288,27 @@ static void touch_reset(void)
     gpio_set_level(GPIO_TOUCH_INT, 0);  /* INT low during reset -> selects 0x5D address */
 
     if (s_board->has_ch32v003) {
-        /* LCD panel reset first (IO3), then GT911 reset (IO1) */
-        ch32v003_output(3, 0);
-        esp_rom_delay_us(20 * 1000);
-        ch32v003_output(3, 1);
-        esp_rom_delay_us(50 * 1000);
+        /* Set LCD_RST (IO0) and TP_RST (IO1) LOW simultaneously */
+        s_ch32_out &= ~((1 << 0) | (1 << 1));
+        ch32v003_reg_write(0x03, s_ch32_out);
+        esp_rom_delay_us(100 * 1000);       /* Hold in hardware reset for 100ms */
 
-        ch32v003_output(1, 0);              /* TP_RST low */
-        esp_rom_delay_us(50 * 1000);
-        ch32v003_output(1, 1);              /* TP_RST high */
-        esp_rom_delay_us(20 * 1000);        /* 20ms: GT911 samples INT state */
+        /* Set LCD_RST (IO0) and TP_RST (IO1) HIGH */
+        s_ch32_out |= ((1 << 0) | (1 << 1));
+        ch32v003_reg_write(0x03, s_ch32_out);
+        esp_rom_delay_us(20 * 1000);        /* 20ms delay: GT911 latches address 0x5D */
 
         gpio_set_direction(GPIO_TOUCH_INT, GPIO_MODE_INPUT); /* Release INT pin */
-        esp_rom_delay_us(100 * 1000);       /* Allow GT911 startup completion */
+        esp_rom_delay_us(100 * 1000);       /* 100ms delay: GT911 completes startup */
     } else if (s_board->has_ch422g) {
         ch422g_write(0x24, 0x01);
         ch422g_write(0x38, 0x2C);            /* TP_RST low */
         esp_rom_delay_us(50 * 1000);
         ch422g_write(0x38, 0x2E);            /* TP_RST high */
-        esp_rom_delay_us(20 * 1000);        /* 20ms: GT911 samples INT state */
+        esp_rom_delay_us(20 * 1000);
 
-        gpio_set_direction(GPIO_TOUCH_INT, GPIO_MODE_INPUT); /* Release INT pin */
-        esp_rom_delay_us(100 * 1000);       /* Allow GT911 startup completion */
+        gpio_set_direction(GPIO_TOUCH_INT, GPIO_MODE_INPUT);
+        esp_rom_delay_us(100 * 1000);
     } else if (s_board->tp_rst_gpio >= 0) {
         gpio_config_t rst_conf = {
             .intr_type = GPIO_INTR_DISABLE,
