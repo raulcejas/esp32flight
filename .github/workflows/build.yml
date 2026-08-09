@@ -1,0 +1,28 @@
+name: Build ESP32 Firmware
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: ESP-IDF Build
+        uses: espressif/esp-idf-actions/build@v1
+        with:
+          esp_idf_version: 'v5.1.2'
+          target: 'esp32s3'
+
+      - name: Upload Compiled Binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: esp32flight-4mb-firmware
+          path: |
+            build/*.bin
+            build/bootloader/*.bin
+            build/partition_table/*.bin
