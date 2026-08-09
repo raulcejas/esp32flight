@@ -209,7 +209,7 @@ static esp_err_t ch422g_write(uint8_t addr, uint8_t val)
 
 /* CH32V003 helper MCU on the 7B (I2C 0x24): register writes, not the
  * CH422G address scheme. 0x02 pin modes, 0x03 output byte, 0x05 PWM.
- * IO0 = LCD_RST, IO1 = TP_RST, IO2 = backlight enable, IO3 = SD_CS. */
+ * IO1 = TP_RST, IO2 = backlight enable, IO3 = LCD_RST, IO4 = SD_CS. */
 static uint8_t s_ch32_out = 0xFF;
 
 static esp_err_t ch32v003_reg_write(uint8_t reg, uint8_t val)
@@ -288,18 +288,18 @@ static void touch_reset(void)
     gpio_set_level(GPIO_TOUCH_INT, 0);  /* INT low during reset -> selects 0x5D address */
 
     if (s_board->has_ch32v003) {
-        /* Set LCD_RST (IO0) and TP_RST (IO1) LOW simultaneously */
-        s_ch32_out &= ~((1 << 0) | (1 << 1));
+        /* Pull TP_RST (IO1) and LCD_RST (IO3) LOW simultaneously */
+        s_ch32_out &= ~((1 << 1) | (1 << 3));
         ch32v003_reg_write(0x03, s_ch32_out);
-        esp_rom_delay_us(100 * 1000);       /* Hold in hardware reset for 100ms */
+        esp_rom_delay_us(100 * 1000);       /* Hold reset LOW for 100ms */
 
-        /* Set LCD_RST (IO0) and TP_RST (IO1) HIGH */
-        s_ch32_out |= ((1 << 0) | (1 << 1));
+        /* Pull TP_RST (IO1) and LCD_RST (IO3) HIGH */
+        s_ch32_out |= ((1 << 1) | (1 << 3));
         ch32v003_reg_write(0x03, s_ch32_out);
-        esp_rom_delay_us(20 * 1000);        /* 20ms delay: GT911 latches address 0x5D */
+        esp_rom_delay_us(20 * 1000);        /* Delay 20ms while GT911 latches address 0x5D */
 
         gpio_set_direction(GPIO_TOUCH_INT, GPIO_MODE_INPUT); /* Release INT pin */
-        esp_rom_delay_us(100 * 1000);       /* 100ms delay: GT911 completes startup */
+        esp_rom_delay_us(100 * 1000);       /* Allow GT911 startup completion */
     } else if (s_board->has_ch422g) {
         ch422g_write(0x24, 0x01);
         ch422g_write(0x38, 0x2C);            /* TP_RST low */
