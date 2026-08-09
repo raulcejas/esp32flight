@@ -193,7 +193,7 @@ static esp_err_t i2c_master_init(int sda, int scl)
         .scl_io_num = scl,
         .sda_pullup_en = GPIO_PULLUP_ENABLE,
         .scl_pullup_en = GPIO_PULLUP_ENABLE,
-        .master.clk_speed = I2C_MASTER_FREQ_HZ,
+        .master.clk_speed = 100000, /* 100kHz standard speed for stable GT911 communication */
     };
     i2c_param_config(I2C_MASTER_NUM, &i2c_conf);
     return i2c_driver_install(I2C_MASTER_NUM, i2c_conf.mode, 0, 0, 0);
@@ -279,59 +279,51 @@ static void board_detect(void)
 
 static void touch_reset(void)
 {
-    if (s_board->has_ch32v003) {
-        gpio_config_t io_conf = {
-            .intr_type = GPIO_INTR_DISABLE,
-            .pin_bit_mask = 1ULL << GPIO_TOUCH_INT,
-            .mode = GPIO_MODE_OUTPUT,
-        };
-        gpio_config(&io_conf);
+    gpio_config_t io_conf = {
+        .intr_type = GPIO_INTR_DISABLE,
+        .pin_bit_mask = 1ULL << GPIO_TOUCH_INT,
+        .mode = GPIO_MODE_OUTPUT,
+    };
+    gpio_config(&io_conf);
+    gpio_set_level(GPIO_TOUCH_INT, 0);  /* INT low during reset -> selects 0x5D address */
 
-        /* LCD panel reset first (IO3), then GT911 with INT held low so it
-         * comes up at address 0x5D, exactly like the CH422G flow */
+    if (s_board->has_ch32v003) {
+        /* LCD panel reset first (IO3), then GT911 reset (IO1) */
         ch32v003_output(3, 0);
         esp_rom_delay_us(20 * 1000);
         ch32v003_output(3, 1);
-        esp_rom_delay_us(120 * 1000);
+        esp_rom_delay_us(50 * 1000);
 
         ch32v003_output(1, 0);              /* TP_RST low */
-        esp_rom_delay_us(100 * 1000);
-        gpio_set_level(GPIO_TOUCH_INT, 0);  /* INT low during reset -> addr 0x5D */
-        esp_rom_delay_us(100 * 1000);
+        esp_rom_delay_us(50 * 1000);
         ch32v003_output(1, 1);              /* TP_RST high */
-        esp_rom_delay_us(200 * 1000);
+        esp_rom_delay_us(20 * 1000);        /* 20ms: GT911 samples INT state */
 
-        /* Release INT pin back to INPUT so GT911 can communicate on I2C */
-        gpio_set_direction(GPIO_TOUCH_INT, GPIO_MODE_INPUT);
+        gpio_set_direction(GPIO_TOUCH_INT, GPIO_MODE_INPUT); /* Release INT pin */
+        esp_rom_delay_us(100 * 1000);       /* Allow GT911 startup completion */
     } else if (s_board->has_ch422g) {
-        gpio_config_t io_conf = {
-            .intr_type = GPIO_INTR_DISABLE,
-            .pin_bit_mask = 1ULL << GPIO_TOUCH_INT,
-            .mode = GPIO_MODE_OUTPUT,
-        };
-        gpio_config(&io_conf);
-
         ch422g_write(0x24, 0x01);
         ch422g_write(0x38, 0x2C);            /* TP_RST low */
-        esp_rom_delay_us(100 * 1000);
-        gpio_set_level(GPIO_TOUCH_INT, 0);  /* INT low during reset -> addr 0x5D */
-        esp_rom_delay_us(100 * 1000);
+        esp_rom_delay_us(50 * 1000);
         ch422g_write(0x38, 0x2E);            /* TP_RST high */
-        esp_rom_delay_us(200 * 1000);
+        esp_rom_delay_us(20 * 1000);        /* 20ms: GT911 samples INT state */
 
-        /* Release INT pin back to INPUT so GT911 can communicate on I2C */
-        gpio_set_direction(GPIO_TOUCH_INT, GPIO_MODE_INPUT);
-    } else {
-        gpio_config_t io_conf = {
+        gpio_set_direction(GPIO_TOUCH_INT, GPIO_MODE_INPUT); /* Release INT pin */
+        esp_rom_delay_us(100 * 1000);       /* Allow GT911 startup completion */
+    } else if (s_board->tp_rst_gpio >= 0) {
+        gpio_config_t rst_conf = {
             .intr_type = GPIO_INTR_DISABLE,
             .pin_bit_mask = 1ULL << s_board->tp_rst_gpio,
             .mode = GPIO_MODE_OUTPUT,
         };
-        gpio_config(&io_conf);
+        gpio_config(&rst_conf);
         gpio_set_level(s_board->tp_rst_gpio, 0);
-        esp_rom_delay_us(100 * 1000);
+        esp_rom_delay_us(50 * 1000);
         gpio_set_level(s_board->tp_rst_gpio, 1);
-        esp_rom_delay_us(200 * 1000);
+        esp_rom_delay_us(20 * 1000);
+
+        gpio_set_direction(GPIO_TOUCH_INT, GPIO_MODE_INPUT);
+        esp_rom_delay_us(100 * 1000);
     }
 }
 
@@ -412,7 +404,6 @@ esp_err_t waveshare_esp32_s3_rgb_lcd_init(void)
 
     esp_lcd_panel_io_handle_t tp_io_handle = NULL;
     esp_lcd_panel_io_i2c_config_t tp_io_config = ESP_LCD_TOUCH_IO_I2C_GT911_CONFIG();
-    /* Set to 0 for legacy i2c master driver compatibility in IDF v5.2+ */
     tp_io_config.scl_speed_hz = 0;
 
     esp_lcd_touch_config_t tp_cfg = {
@@ -431,8 +422,7 @@ esp_err_t waveshare_esp32_s3_rgb_lcd_init(void)
         },
     };
 
-    /* Without the INT-pin trick the GT911 can come up on either address;
-     * try the default, fall back to the alternate. */
+    /* Try 0x5D first (forced via INT low during reset), then fallback to 0x14 */
     esp_err_t terr = ESP_FAIL;
     for (int attempt = 0; attempt < 2 && terr != ESP_OK; attempt++) {
         tp_io_config.dev_addr = attempt == 0
