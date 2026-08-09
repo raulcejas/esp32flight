@@ -1,15 +1,6 @@
 /*
- * Display bring-up for the supported 800x480 RGB boards. One binary drives
- * both: the board is picked at boot (or forced via menuconfig).
- *
- *  - Waveshare ESP32-S3-Touch-LCD-7: CH422G IO expander on I2C handles the
- *    backlight and touch reset. The expander's presence is also how the
- *    board is detected.
- *  - Guition JC8048W550 (5"): same panel type on different pins, backlight
- *    on a plain GPIO, GT911 reset on a GPIO, touch mirrored in both axes.
- *    Pin map extracted from KamKubicki/flyRadarEsp32 (working device).
- *
- * Adapted from Waveshare's 08_lvgl_Porting demo (CC0-1.0).
+ * Display bring-up for the supported 800x480 & 1024x600 RGB boards.
+ * Adapted from Waveshare's porting demo (CC0-1.0).
  */
 #include "waveshare_rgb_lcd_port.h"
 #if CONFIG_CANFLIGHT_BOARD_SUNTON_4827S043R
@@ -24,24 +15,23 @@ typedef struct {
     int de, vsync, hsync, pclk;
     int data[16];                /* B0..B4, G0..G5, R0..R4 */
     int i2c_sda, i2c_scl;
-    bool has_ch422g;             /* backlight + touch reset via expander */
-    bool has_ch32v003;           /* 7B: helper MCU at 0x24 (regs, not CH422G) */
-    int bl_gpio;                 /* when neither expander is present */
-    int tp_rst_gpio;             /* when neither expander is present */
-    /* RGB timing set (the 1024x600 panel needs its own) */
+    bool has_ch422g;             /* backlight + touch reset via CH422G */
+    bool has_ch32v003;           /* 7B: helper MCU at 0x24 */
+    int bl_gpio;
+    int tp_rst_gpio;
     int hs_pulse, hs_bp, hs_fp, vs_pulse, vs_bp, vs_fp;
-    int pclk_hz;                 /* 0 -> EXAMPLE_LCD_PIXEL_CLOCK_HZ default */
-    bool tp_mirror;              /* GT911 reports mirrored coordinates */
-    bool has_xpt2046;            /* resistive touch over SPI instead of GT911 */
+    int pclk_hz;
+    bool tp_mirror;
+    bool has_xpt2046;
     int tp_sclk, tp_mosi, tp_miso, tp_cs, tp_irq;
 } board_cfg_t;
 
 __attribute__((unused)) static const board_cfg_t k_waveshare = {
     .name = "Waveshare ESP32-S3-Touch-LCD (4.3/5/7)",
     .de = 5, .vsync = 3, .hsync = 46, .pclk = 7,
-    .data = { 14, 38, 18, 17, 10,       /* B0..B4 */
-              39, 0, 45, 48, 47, 21,    /* G0..G5 */
-              1, 2, 42, 41, 40 },       /* R0..R4 */
+    .data = { 14, 38, 18, 17, 10,
+              39, 0, 45, 48, 47, 21,
+              1, 2, 42, 41, 40 },
     .i2c_sda = 8, .i2c_scl = 9,
     .has_ch422g = true,
     .bl_gpio = -1,
@@ -54,9 +44,9 @@ __attribute__((unused)) static const board_cfg_t k_waveshare = {
 __attribute__((unused)) static const board_cfg_t k_waveshare_7b = {
     .name = "Waveshare ESP32-S3-Touch-LCD-7B (1024x600)",
     .de = 5, .vsync = 3, .hsync = 46, .pclk = 7,
-    .data = { 14, 38, 18, 17, 10,       /* B0..B4 */
-              39, 0, 45, 48, 47, 21,    /* G0..G5 */
-              1, 2, 42, 41, 40 },       /* R0..R4 */
+    .data = { 14, 38, 18, 17, 10,
+              39, 0, 45, 48, 47, 21,
+              1, 2, 42, 41, 40 },
     .i2c_sda = 8, .i2c_scl = 9,
     .has_ch422g = false,
     .has_ch32v003 = true,
@@ -70,9 +60,9 @@ __attribute__((unused)) static const board_cfg_t k_waveshare_7b = {
 __attribute__((unused)) static const board_cfg_t k_guition = {
     .name = "Guition JC8048W550",
     .de = 40, .vsync = 41, .hsync = 39, .pclk = 42,
-    .data = { 8, 3, 46, 9, 1,           /* B0..B4 */
-              5, 6, 7, 15, 16, 4,       /* G0..G5 */
-              45, 48, 47, 21, 14 },     /* R0..R4 */
+    .data = { 8, 3, 46, 9, 1,
+              5, 6, 7, 15, 16, 4,
+              45, 48, 47, 21, 14 },
     .i2c_sda = 19, .i2c_scl = 20,
     .has_ch422g = false,
     .bl_gpio = 2,
@@ -85,9 +75,9 @@ __attribute__((unused)) static const board_cfg_t k_guition = {
 __attribute__((unused)) static const board_cfg_t k_crowpanel_50 = {
     .name = "Elecrow CrowPanel 5.0 (4MB)",
     .de = 40, .vsync = 41, .hsync = 39, .pclk = 0,
-    .data = { 8, 3, 46, 9, 1,           /* B0..B4 */
-              5, 6, 7, 15, 16, 4,       /* G0..G5 */
-              45, 48, 47, 21, 14 },     /* R0..R4 */
+    .data = { 8, 3, 46, 9, 1,
+              5, 6, 7, 15, 16, 4,
+              45, 48, 47, 21, 14 },
     .i2c_sda = 19, .i2c_scl = 20,
     .has_ch422g = false,
     .bl_gpio = 2,
@@ -100,9 +90,9 @@ __attribute__((unused)) static const board_cfg_t k_crowpanel_50 = {
 __attribute__((unused)) static const board_cfg_t k_sunton_4827 = {
     .name = "Sunton ESP32-4827S043 (480x272)",
     .de = 40, .vsync = 41, .hsync = 39, .pclk = 42,
-    .data = { 8, 3, 46, 9, 1,           /* B0..B4 */
-              5, 6, 7, 15, 16, 4,       /* G0..G5 */
-              45, 48, 47, 21, 14 },     /* R0..R4 */
+    .data = { 8, 3, 46, 9, 1,
+              5, 6, 7, 15, 16, 4,
+              45, 48, 47, 21, 14 },
     .i2c_sda = 19, .i2c_scl = 20,
     .has_ch422g = false,
     .bl_gpio = 2,
@@ -116,9 +106,9 @@ __attribute__((unused)) static const board_cfg_t k_sunton_4827 = {
 __attribute__((unused)) static const board_cfg_t k_sunton_4827r = {
     .name = "Sunton ESP32-4827S043R (480x272, resistive)",
     .de = 40, .vsync = 41, .hsync = 39, .pclk = 42,
-    .data = { 8, 3, 46, 9, 1,           /* B0..B4 */
-              5, 6, 7, 15, 16, 4,       /* G0..G5 */
-              45, 48, 47, 21, 14 },     /* R0..R4 */
+    .data = { 8, 3, 46, 9, 1,
+              5, 6, 7, 15, 16, 4,
+              45, 48, 47, 21, 14 },
     .i2c_sda = -1, .i2c_scl = -1,
     .has_ch422g = false,
     .bl_gpio = 2,
@@ -164,8 +154,43 @@ IRAM_ATTR static bool rgb_lcd_on_vsync_event(esp_lcd_panel_handle_t panel,
     return lvgl_port_notify_rgb_vsync();
 }
 
+/* Recover stuck I2C bus by pulsing SCL up to 9 times */
+static void i2c_bus_recovery(int sda, int scl)
+{
+    gpio_config_t conf = {
+        .intr_type = GPIO_INTR_DISABLE,
+        .mode = GPIO_MODE_INPUT_OUTPUT_OD,
+        .pin_bit_mask = (1ULL << sda) | (1ULL << scl),
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .pull_up_en = GPIO_PULLUP_ENABLE,
+    };
+    gpio_config(&conf);
+
+    gpio_set_level(sda, 1);
+    gpio_set_level(scl, 1);
+    esp_rom_delay_us(10);
+
+    /* If SDA is held low by a slave, clock SCL until SDA goes high */
+    for (int i = 0; i < 9 && gpio_get_level(sda) == 0; i++) {
+        gpio_set_level(scl, 0);
+        esp_rom_delay_us(10);
+        gpio_set_level(scl, 1);
+        esp_rom_delay_us(10);
+    }
+
+    /* Manual STOP condition */
+    gpio_set_level(sda, 0);
+    esp_rom_delay_us(10);
+    gpio_set_level(scl, 1);
+    esp_rom_delay_us(10);
+    gpio_set_level(sda, 1);
+    esp_rom_delay_us(10);
+}
+
 static esp_err_t i2c_master_init(int sda, int scl)
 {
+    i2c_bus_recovery(sda, scl);
+
     i2c_config_t i2c_conf = {
         .mode = I2C_MODE_MASTER,
         .sda_io_num = sda,
@@ -178,26 +203,20 @@ static esp_err_t i2c_master_init(int sda, int scl)
     return i2c_driver_install(I2C_MASTER_NUM, i2c_conf.mode, 0, 0, 0);
 }
 
-static uint16_t i2c_scan(void)
+static void i2c_scan(void)
 {
-    uint16_t mask = 0;
     ESP_LOGI(TAG, "Scanning I2C bus...");
+    int found = 0;
     for (uint8_t addr = 1; addr < 127; addr++) {
-        i2c_cmd_handle_t cmd = i2c_cmd_link_create();
-        i2c_master_start(cmd);
-        i2c_master_write_byte(cmd, (addr << 1) | I2C_MASTER_WRITE, true);
-        i2c_master_stop(cmd);
-        esp_err_t ret = i2c_master_cmd_begin(I2C_MASTER_NUM, cmd, pdMS_TO_TICKS(50));
-        i2c_cmd_link_delete(cmd);
+        esp_err_t ret = i2c_master_write_to_device(I2C_MASTER_NUM, addr, NULL, 0, pdMS_TO_TICKS(20));
         if (ret == ESP_OK) {
-            ESP_LOGI(TAG, "  I2C device found at address 0x%02X", addr);
-            if (addr < 16) mask |= (1 << addr);
-            else if (addr == 0x24) mask |= (1 << 4);
-            else if (addr == 0x5D) mask |= (1 << 5);
-            else if (addr == 0x14) mask |= (1 << 6);
+            ESP_LOGI(TAG, "  -> Found device at I2C address 0x%02X", addr);
+            found++;
         }
     }
-    return mask;
+    if (found == 0) {
+        ESP_LOGW(TAG, "  -> No I2C devices responded on SDA/SCL pins!");
+    }
 }
 
 static esp_err_t ch422g_write(uint8_t addr, uint8_t val)
@@ -245,7 +264,7 @@ static void board_detect(void)
     i2c_master_init(s_board->i2c_sda, s_board->i2c_scl);
     esp_err_t err1 = ch32v003_reg_write(0x02, 0xFF);
     esp_err_t err2 = ch32v003_reg_write(0x03, s_ch32_out);
-    ESP_LOGI(TAG, "CH32V003 init regs 0x02/0x03 ret: %s / %s",
+    ESP_LOGI(TAG, "CH32V003 init status: 0x02=%s, 0x03=%s",
              esp_err_to_name(err1), esp_err_to_name(err2));
 #elif CONFIG_CANFLIGHT_BOARD_CROWPANEL_50
     s_board = &k_crowpanel_50;
@@ -277,7 +296,7 @@ static void touch_reset(void)
         .mode = GPIO_MODE_OUTPUT,
     };
     gpio_config(&io_conf);
-    gpio_set_level(GPIO_TOUCH_INT, 0);
+    gpio_set_level(GPIO_TOUCH_INT, 0);  /* INT low during reset -> address 0x5D */
 
     if (s_board->has_ch32v003) {
         s_ch32_out &= ~((1 << 1) | (1 << 3));
@@ -315,7 +334,7 @@ static void touch_reset(void)
         vTaskDelay(pdMS_TO_TICKS(100));
     }
 
-    ESP_LOGI(TAG, "Post-reset I2C scan:");
+    ESP_LOGI(TAG, "Post-reset bus scan:");
     i2c_scan();
 }
 
@@ -415,8 +434,8 @@ esp_err_t waveshare_esp32_s3_rgb_lcd_init(void)
     };
 
     esp_err_t terr = ESP_FAIL;
-    uint8_t addresses[] = { ESP_LCD_TOUCH_IO_I2C_GT911_ADDRESS, ESP_LCD_TOUCH_IO_I2C_GT911_ADDRESS_BACKUP, 0x5D, 0x14, 0xBA, 0x28 };
-    for (int i = 0; i < sizeof(addresses)/sizeof(addresses[0]) && terr != ESP_OK; i++) {
+    uint8_t addresses[] = { 0x5D, 0x14, 0xBA, 0x28 };
+    for (int i = 0; i < (sizeof(addresses) / sizeof(addresses[0])) && terr != ESP_OK; i++) {
         tp_io_config.dev_addr = addresses[i];
         if (esp_lcd_new_panel_io_i2c((esp_lcd_i2c_bus_handle_t)I2C_MASTER_NUM,
                                      &tp_io_config, &tp_io_handle) != ESP_OK) {
@@ -427,7 +446,7 @@ esp_err_t waveshare_esp32_s3_rgb_lcd_init(void)
             esp_lcd_panel_io_del(tp_io_handle);
             tp_io_handle = NULL;
         } else {
-            ESP_LOGI(TAG, "GT911 successfully connected at 0x%02X", addresses[i]);
+            ESP_LOGI(TAG, "GT911 touch successfully attached at address 0x%02X", addresses[i]);
         }
     }
     if (terr != ESP_OK) {
