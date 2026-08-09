@@ -17,6 +17,8 @@ jobs:
       - name: Build Firmware
         run: |
           . $IDF_PATH/export.sh
+          mkdir -p assets-4mb
+          if [ -d "assets" ]; then cp -r assets/* assets-4mb/ 2>/dev/null || true; fi
           idf.py set-target esp32s3
           idf.py build
 
