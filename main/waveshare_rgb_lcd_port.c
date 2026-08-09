@@ -22,17 +22,17 @@ static const char *TAG = "lcd_port";
 typedef struct {
     const char *name;
     int de, vsync, hsync, pclk;
-    int data[16];               /* B0..B4, G0..G5, R0..R4 */
+    int data[16];                /* B0..B4, G0..G5, R0..R4 */
     int i2c_sda, i2c_scl;
-    bool has_ch422g;            /* backlight + touch reset via expander */
-    bool has_ch32v003;          /* 7B: helper MCU at 0x24 (regs, not CH422G) */
-    int bl_gpio;                /* when neither expander is present */
-    int tp_rst_gpio;            /* when neither expander is present */
+    bool has_ch422g;             /* backlight + touch reset via expander */
+    bool has_ch32v003;           /* 7B: helper MCU at 0x24 (regs, not CH422G) */
+    int bl_gpio;                 /* when neither expander is present */
+    int tp_rst_gpio;             /* when neither expander is present */
     /* RGB timing set (the 1024x600 panel needs its own) */
     int hs_pulse, hs_bp, hs_fp, vs_pulse, vs_bp, vs_fp;
-    int pclk_hz;                /* 0 -> EXAMPLE_LCD_PIXEL_CLOCK_HZ default */
-    bool tp_mirror;             /* GT911 reports mirrored coordinates */
-    bool has_xpt2046;           /* resistive touch over SPI instead of GT911 */
+    int pclk_hz;                 /* 0 -> EXAMPLE_LCD_PIXEL_CLOCK_HZ default */
+    bool tp_mirror;              /* GT911 reports mirrored coordinates */
+    bool has_xpt2046;            /* resistive touch over SPI instead of GT911 */
     int tp_sclk, tp_mosi, tp_miso, tp_cs, tp_irq;
 } board_cfg_t;
 
@@ -300,6 +300,9 @@ static void touch_reset(void)
         esp_rom_delay_us(100 * 1000);
         ch32v003_output(1, 1);              /* TP_RST high */
         esp_rom_delay_us(200 * 1000);
+
+        /* Release INT pin back to INPUT so GT911 can communicate on I2C */
+        gpio_set_direction(GPIO_TOUCH_INT, GPIO_MODE_INPUT);
     } else if (s_board->has_ch422g) {
         gpio_config_t io_conf = {
             .intr_type = GPIO_INTR_DISABLE,
@@ -309,12 +312,15 @@ static void touch_reset(void)
         gpio_config(&io_conf);
 
         ch422g_write(0x24, 0x01);
-        ch422g_write(0x38, 0x2C);           /* TP_RST low */
+        ch422g_write(0x38, 0x2C);            /* TP_RST low */
         esp_rom_delay_us(100 * 1000);
         gpio_set_level(GPIO_TOUCH_INT, 0);  /* INT low during reset -> addr 0x5D */
         esp_rom_delay_us(100 * 1000);
-        ch422g_write(0x38, 0x2E);           /* TP_RST high */
+        ch422g_write(0x38, 0x2E);            /* TP_RST high */
         esp_rom_delay_us(200 * 1000);
+
+        /* Release INT pin back to INPUT so GT911 can communicate on I2C */
+        gpio_set_direction(GPIO_TOUCH_INT, GPIO_MODE_INPUT);
     } else {
         gpio_config_t io_conf = {
             .intr_type = GPIO_INTR_DISABLE,
@@ -389,7 +395,7 @@ esp_err_t waveshare_esp32_s3_rgb_lcd_init(void)
     esp_lcd_panel_io_spi_config_t tp_io_cfg =
         ESP_LCD_TOUCH_IO_SPI_XPT2046_CONFIG(s_board->tp_cs);
     ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)SPI2_HOST,
-                                             &tp_io_cfg, &tp_io));
+                                              &tp_io_cfg, &tp_io));
     esp_lcd_touch_config_t xpt_cfg = {
         .x_max = EXAMPLE_LCD_H_RES,
         .y_max = EXAMPLE_LCD_V_RES,
@@ -406,14 +412,14 @@ esp_err_t waveshare_esp32_s3_rgb_lcd_init(void)
 
     esp_lcd_panel_io_handle_t tp_io_handle = NULL;
     esp_lcd_panel_io_i2c_config_t tp_io_config = ESP_LCD_TOUCH_IO_I2C_GT911_CONFIG();
-    /* Set explicitly for ESP-IDF v5.2+ panel IO driver */
-    tp_io_config.scl_speed_hz = 400000;
+    /* Set to 0 for legacy i2c master driver compatibility in IDF v5.2+ */
+    tp_io_config.scl_speed_hz = 0;
 
     esp_lcd_touch_config_t tp_cfg = {
         .x_max = EXAMPLE_LCD_H_RES,
         .y_max = EXAMPLE_LCD_V_RES,
         .rst_gpio_num = -1,
-        .int_gpio_num = -1,
+        .int_gpio_num = GPIO_TOUCH_INT,
         .levels = {
             .reset = 0,
             .interrupt = 0,
