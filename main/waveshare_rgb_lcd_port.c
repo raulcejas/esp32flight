@@ -406,8 +406,8 @@ esp_err_t waveshare_esp32_s3_rgb_lcd_init(void)
 
     esp_lcd_panel_io_handle_t tp_io_handle = NULL;
     esp_lcd_panel_io_i2c_config_t tp_io_config = ESP_LCD_TOUCH_IO_I2C_GT911_CONFIG();
-    /* Legacy i2c driver sets the bus speed itself; v1 io rejects a non-zero value here. */
-    tp_io_config.scl_speed_hz = 0;
+    /* Set explicitly for ESP-IDF v5.2+ panel IO driver */
+    tp_io_config.scl_clock_hz = 400000;
 
     esp_lcd_touch_config_t tp_cfg = {
         .x_max = EXAMPLE_LCD_H_RES,
