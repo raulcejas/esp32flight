@@ -37,10 +37,6 @@ typedef struct {
 } board_cfg_t;
 
 __attribute__((unused)) static const board_cfg_t k_waveshare = {
-    /* One PCB family: the 4.3", 5" and 7" Waveshare 800x480 boards share
-     * every pin, the expander and the timings (verified against the
-     * official demos of both the 7 and the 4.3 repos), so this single
-     * entry covers them all. */
     .name = "Waveshare ESP32-S3-Touch-LCD (4.3/5/7)",
     .de = 5, .vsync = 3, .hsync = 46, .pclk = 7,
     .data = { 14, 38, 18, 17, 10,       /* B0..B4 */
@@ -56,10 +52,6 @@ __attribute__((unused)) static const board_cfg_t k_waveshare = {
 };
 
 __attribute__((unused)) static const board_cfg_t k_waveshare_7b = {
-    /* Type-B 7": same RGB wiring as the 800x480 family, but a 1024x600
-     * panel with its own timings and a CH32V003 helper MCU (I2C 0x24,
-     * register protocol: 0x02 mode, 0x03 outputs, 0x05 backlight PWM).
-     * Values verified against waveshareteam/ESP32-S3-Touch-LCD-7B. */
     .name = "Waveshare ESP32-S3-Touch-LCD-7B (1024x600)",
     .de = 5, .vsync = 3, .hsync = 46, .pclk = 7,
     .data = { 14, 38, 18, 17, 10,       /* B0..B4 */
@@ -91,11 +83,6 @@ __attribute__((unused)) static const board_cfg_t k_guition = {
 };
 
 __attribute__((unused)) static const board_cfg_t k_crowpanel_50 = {
-    /* Elecrow CrowPanel 5.0 (DIS07050H): Guition-family RGB wiring with
-     * PCLK moved to GPIO0 (a strapping pin - harmless after boot) and no
-     * touch reset line under our control. Pin map from the ESPHome
-     * devices database (working configs). 4 MB flash: pairs with the
-     * partitions-4mb.csv single-slot layout, never auto-detected. */
     .name = "Elecrow CrowPanel 5.0 (4MB)",
     .de = 40, .vsync = 41, .hsync = 39, .pclk = 0,
     .data = { 8, 3, 46, 9, 1,           /* B0..B4 */
@@ -111,12 +98,6 @@ __attribute__((unused)) static const board_cfg_t k_crowpanel_50 = {
 };
 
 __attribute__((unused)) static const board_cfg_t k_sunton_4827 = {
-    /* Sunton ESP32-4827S043 (4.3" 480x272): electrically the Guition
-     * JC8048W550's smaller sibling - same RGB wiring, I2C bus, backlight
-     * GPIO and GT911 reset, only the panel and its timings differ.
-     * Pin map and timings from rzeldent/esp32-smartdisplay (working
-     * device). The resolution differs from the 800x480 family, so this
-     * is a dedicated build, never part of the auto-detected binary. */
     .name = "Sunton ESP32-4827S043 (480x272)",
     .de = 40, .vsync = 41, .hsync = 39, .pclk = 42,
     .data = { 8, 3, 46, 9, 1,           /* B0..B4 */
@@ -133,8 +114,6 @@ __attribute__((unused)) static const board_cfg_t k_sunton_4827 = {
 };
 
 __attribute__((unused)) static const board_cfg_t k_sunton_4827r = {
-    /* Resistive-touch variant of the 4827S043: identical panel and RGB
-     * wiring, XPT2046 on the SD-card SPI bus instead of the GT911. */
     .name = "Sunton ESP32-4827S043R (480x272, resistive)",
     .de = 40, .vsync = 41, .hsync = 39, .pclk = 42,
     .data = { 8, 3, 46, 9, 1,           /* B0..B4 */
@@ -199,17 +178,34 @@ static esp_err_t i2c_master_init(int sda, int scl)
     return i2c_driver_install(I2C_MASTER_NUM, i2c_conf.mode, 0, 0, 0);
 }
 
-/* CH422G I2C expander: raw writes, 0x24 = mode reg (0x01 -> push-pull out),
- * 0x38 = EXIO0-7 output byte. EXIO1=TP_RST, EXIO2=backlight, EXIO3=LCD_RST. */
+static uint16_t i2c_scan(void)
+{
+    uint16_t mask = 0;
+    ESP_LOGI(TAG, "Scanning I2C bus...");
+    for (uint8_t addr = 1; addr < 127; addr++) {
+        i2c_cmd_handle_t cmd = i2c_cmd_link_create();
+        i2c_master_start(cmd);
+        i2c_master_write_byte(cmd, (addr << 1) | I2C_MASTER_WRITE, true);
+        i2c_master_stop(cmd);
+        esp_err_t ret = i2c_master_cmd_begin(I2C_MASTER_NUM, cmd, pdMS_TO_TICKS(50));
+        i2c_cmd_link_delete(cmd);
+        if (ret == ESP_OK) {
+            ESP_LOGI(TAG, "  I2C device found at address 0x%02X", addr);
+            if (addr < 16) mask |= (1 << addr);
+            else if (addr == 0x24) mask |= (1 << 4);
+            else if (addr == 0x5D) mask |= (1 << 5);
+            else if (addr == 0x14) mask |= (1 << 6);
+        }
+    }
+    return mask;
+}
+
 static esp_err_t ch422g_write(uint8_t addr, uint8_t val)
 {
     return i2c_master_write_to_device(I2C_MASTER_NUM, addr, &val, 1,
                                       I2C_MASTER_TIMEOUT_MS / portTICK_PERIOD_MS);
 }
 
-/* CH32V003 helper MCU on the 7B (I2C 0x24): register writes, not the
- * CH422G address scheme. 0x02 pin modes, 0x03 output byte, 0x05 PWM.
- * IO1 = TP_RST, IO2 = backlight enable, IO3 = LCD_RST, IO4 = SD_CS. */
 static uint8_t s_ch32_out = 0xFF;
 
 static esp_err_t ch32v003_reg_write(uint8_t reg, uint8_t val)
@@ -229,9 +225,6 @@ static void ch32v003_output(uint8_t pin, uint8_t value)
     ch32v003_reg_write(0x03, s_ch32_out);
 }
 
-/* 0-100; the vendor driver caps at 97 because 100 makes the panel flicker.
- * The PWM register is inverted (measured on hardware: 90 -> ~10% light),
- * so the duty is written as 100-pct. */
 static void ch32v003_backlight_pct(int pct)
 {
     if (pct > 97) pct = 97;
@@ -239,9 +232,6 @@ static void ch32v003_backlight_pct(int pct)
     ch32v003_reg_write(0x05, (uint8_t)((100 - pct) * 255 / 100));
 }
 
-/* Board detection: only the Waveshare has the CH422G expander, and probing
- * an I2C address is harmless on the Guition (those pins are RGB data lines,
- * still idle at this point; I2C is open-drain). */
 static void board_detect(void)
 {
 #if CONFIG_CANFLIGHT_BOARD_WAVESHARE_7
@@ -253,9 +243,10 @@ static void board_detect(void)
 #elif CONFIG_CANFLIGHT_BOARD_WAVESHARE_7B
     s_board = &k_waveshare_7b;
     i2c_master_init(s_board->i2c_sda, s_board->i2c_scl);
-    /* all helper-MCU pins to output, everything released (high) */
-    ch32v003_reg_write(0x02, 0xFF);
-    ch32v003_reg_write(0x03, s_ch32_out);
+    esp_err_t err1 = ch32v003_reg_write(0x02, 0xFF);
+    esp_err_t err2 = ch32v003_reg_write(0x03, s_ch32_out);
+    ESP_LOGI(TAG, "CH32V003 init regs 0x02/0x03 ret: %s / %s",
+             esp_err_to_name(err1), esp_err_to_name(err2));
 #elif CONFIG_CANFLIGHT_BOARD_CROWPANEL_50
     s_board = &k_crowpanel_50;
     i2c_master_init(s_board->i2c_sda, s_board->i2c_scl);
@@ -263,7 +254,7 @@ static void board_detect(void)
     s_board = &k_sunton_4827;
     i2c_master_init(s_board->i2c_sda, s_board->i2c_scl);
 #elif CONFIG_CANFLIGHT_BOARD_SUNTON_4827S043R
-    s_board = &k_sunton_4827r;   /* no I2C: touch is SPI, no expander */
+    s_board = &k_sunton_4827r;
 #else
     i2c_master_init(k_waveshare.i2c_sda, k_waveshare.i2c_scl);
     if (ch422g_write(0x24, 0x01) == ESP_OK) {
@@ -275,6 +266,7 @@ static void board_detect(void)
     }
 #endif
     ESP_LOGI(TAG, "board: %s", s_board->name);
+    i2c_scan();
 }
 
 static void touch_reset(void)
@@ -285,30 +277,28 @@ static void touch_reset(void)
         .mode = GPIO_MODE_OUTPUT,
     };
     gpio_config(&io_conf);
-    gpio_set_level(GPIO_TOUCH_INT, 0);  /* INT low during reset -> selects 0x5D address */
+    gpio_set_level(GPIO_TOUCH_INT, 0);
 
     if (s_board->has_ch32v003) {
-        /* Pull TP_RST (IO1) and LCD_RST (IO3) LOW simultaneously */
         s_ch32_out &= ~((1 << 1) | (1 << 3));
         ch32v003_reg_write(0x03, s_ch32_out);
-        esp_rom_delay_us(100 * 1000);       /* Hold reset LOW for 100ms */
+        vTaskDelay(pdMS_TO_TICKS(100));
 
-        /* Pull TP_RST (IO1) and LCD_RST (IO3) HIGH */
         s_ch32_out |= ((1 << 1) | (1 << 3));
         ch32v003_reg_write(0x03, s_ch32_out);
-        esp_rom_delay_us(20 * 1000);        /* Delay 20ms while GT911 latches address 0x5D */
-
-        gpio_set_direction(GPIO_TOUCH_INT, GPIO_MODE_INPUT); /* Release INT pin */
-        esp_rom_delay_us(100 * 1000);       /* Allow GT911 startup completion */
-    } else if (s_board->has_ch422g) {
-        ch422g_write(0x24, 0x01);
-        ch422g_write(0x38, 0x2C);            /* TP_RST low */
-        esp_rom_delay_us(50 * 1000);
-        ch422g_write(0x38, 0x2E);            /* TP_RST high */
-        esp_rom_delay_us(20 * 1000);
+        vTaskDelay(pdMS_TO_TICKS(20));
 
         gpio_set_direction(GPIO_TOUCH_INT, GPIO_MODE_INPUT);
-        esp_rom_delay_us(100 * 1000);
+        vTaskDelay(pdMS_TO_TICKS(100));
+    } else if (s_board->has_ch422g) {
+        ch422g_write(0x24, 0x01);
+        ch422g_write(0x38, 0x2C);
+        vTaskDelay(pdMS_TO_TICKS(50));
+        ch422g_write(0x38, 0x2E);
+        vTaskDelay(pdMS_TO_TICKS(20));
+
+        gpio_set_direction(GPIO_TOUCH_INT, GPIO_MODE_INPUT);
+        vTaskDelay(pdMS_TO_TICKS(100));
     } else if (s_board->tp_rst_gpio >= 0) {
         gpio_config_t rst_conf = {
             .intr_type = GPIO_INTR_DISABLE,
@@ -317,13 +307,16 @@ static void touch_reset(void)
         };
         gpio_config(&rst_conf);
         gpio_set_level(s_board->tp_rst_gpio, 0);
-        esp_rom_delay_us(50 * 1000);
+        vTaskDelay(pdMS_TO_TICKS(50));
         gpio_set_level(s_board->tp_rst_gpio, 1);
-        esp_rom_delay_us(20 * 1000);
+        vTaskDelay(pdMS_TO_TICKS(20));
 
         gpio_set_direction(GPIO_TOUCH_INT, GPIO_MODE_INPUT);
-        esp_rom_delay_us(100 * 1000);
+        vTaskDelay(pdMS_TO_TICKS(100));
     }
+
+    ESP_LOGI(TAG, "Post-reset I2C scan:");
+    i2c_scan();
 }
 
 esp_err_t waveshare_esp32_s3_rgb_lcd_init(void)
@@ -421,12 +414,10 @@ esp_err_t waveshare_esp32_s3_rgb_lcd_init(void)
         },
     };
 
-    /* Try 0x5D first (forced via INT low during reset), then fallback to 0x14 */
     esp_err_t terr = ESP_FAIL;
-    for (int attempt = 0; attempt < 2 && terr != ESP_OK; attempt++) {
-        tp_io_config.dev_addr = attempt == 0
-                                    ? ESP_LCD_TOUCH_IO_I2C_GT911_ADDRESS
-                                    : ESP_LCD_TOUCH_IO_I2C_GT911_ADDRESS_BACKUP;
+    uint8_t addresses[] = { ESP_LCD_TOUCH_IO_I2C_GT911_ADDRESS, ESP_LCD_TOUCH_IO_I2C_GT911_ADDRESS_BACKUP, 0x5D, 0x14, 0xBA, 0x28 };
+    for (int i = 0; i < sizeof(addresses)/sizeof(addresses[0]) && terr != ESP_OK; i++) {
+        tp_io_config.dev_addr = addresses[i];
         if (esp_lcd_new_panel_io_i2c((esp_lcd_i2c_bus_handle_t)I2C_MASTER_NUM,
                                      &tp_io_config, &tp_io_handle) != ESP_OK) {
             continue;
@@ -435,15 +426,15 @@ esp_err_t waveshare_esp32_s3_rgb_lcd_init(void)
         if (terr != ESP_OK) {
             esp_lcd_panel_io_del(tp_io_handle);
             tp_io_handle = NULL;
-            ESP_LOGW(TAG, "GT911 not at 0x%02x, trying alternate",
-                     (unsigned)tp_io_config.dev_addr);
+        } else {
+            ESP_LOGI(TAG, "GT911 successfully connected at 0x%02X", addresses[i]);
         }
     }
     if (terr != ESP_OK) {
         ESP_LOGE(TAG, "GT911 init failed - running without touch");
         tp_handle = NULL;
     }
-#endif /* touch variant */
+#endif
 
     ESP_ERROR_CHECK(lvgl_port_init(panel_handle, tp_handle));
 
